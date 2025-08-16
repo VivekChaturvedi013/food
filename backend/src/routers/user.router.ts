@@ -1,50 +1,69 @@
-import { Router } from "express";import { Sample_Users } from "../data";
+import express, { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import asyncHandler from 'express-async-handler';
-import { FoodModel } from "../models/food.model";
-import { UserModel } from "../models/user.model";
+import User from '../models/User';
+import dotenv from 'dotenv'
 
-const router = Router()
+const router = express.Router();
 
-router.get('/seed', asyncHandler(
-  async (req, res) => {
-    const userCount = await UserModel.countDocuments();
-    if (userCount > 0) {
-      res.send('seed is already done');
+// Register
+router.post('/register', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { name, email, password } = req.body;
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      res.status(400).send({ message: 'User already exists' });
+      return;
     }
-    await UserModel.create(Sample_Users);
-    res.send("seed is done");
-}
 
-) );
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ name, email, password: hashedPassword });
+    await user.save();
 
-router.post("/login", (req, res) => {
-    
-    const { email, password } = req.body;
-    const user = Sample_Users.find(user =>
-        user.email === email && user.password === password
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET!,
+      { expiresIn: '1h' }
     );
-    if (user) {
-        res.send(generatTokenResponse(user));
-    } else {
-        res.status(401).send({ message: "Invalid email or password" });
+    
+    if (token) {
+      res.status(201).send({ token, user: { name: user.name, email: user.email } });
     }
-    // This is a placeholder for user login logic
-    // In a real application, you would validate user credentials here
-    res.send({ message: "Login successful" });
+  } catch (error) {
+    res.status(500).send({ message: 'Internal server error' });
+  }
 });
 
-const generatTokenResponse = (user:any) => {
-    const token = jwt.sign({
-        email: user.email,
-        isAdmin: user.isAdmin
-    }, 'vivek', {
-        expiresIn: '30d' // Token expiration time
-    })
+// Login
+router.post('/login', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user?.password) {
+      res.status(400).send({ message: 'Invalid credentials' });
+      return;
+    }
 
-    user.token = token;
-    return user;
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      res.status(400).send({ message: 'Invalid credentials' });
+      return;
+    }
 
-}
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET!,
+      { expiresIn: '1h' }
+    );
+
+    res.send({ token, user: { name: user.name, email: user.email } });
+  } catch (error) {
+    res.status(500).send({ message: 'Internal server error' });
+  }
+});
+
+
+
+
 
 export default router;
